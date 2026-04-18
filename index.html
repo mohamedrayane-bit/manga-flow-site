@@ -8,8 +8,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, orderBy, addDoc, updateDoc, arrayUnion, arrayRemove, limit, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, orderBy, addDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDV1qDNjsBIbIBqQGBUhZSMpiIbzxLIpu0",
@@ -25,7 +25,6 @@
         window.db = getFirestore(app);
         window.storage = getStorage(app);
     </script>
-    <!-- Libraries for archive extraction -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -51,7 +50,6 @@
         .manga-author { font-size: 11px; color: #888; }
         .rating-stars { display: flex; gap: 3px; margin: 6px 0; font-size: 14px; cursor: pointer; }
         .rating-stars span { color: #ffc107; }
-        .rating-stars span.empty { color: #444; }
         .rating-count { font-size: 10px; color: #aaa; margin-left: 4px; }
         .reading-container { padding: 20px; max-width: 800px; margin: 0 auto; }
         .chapter-nav, .page-controls { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
@@ -61,13 +59,15 @@
         .back-btn { background: transparent; color: #e94560; flex: 0; }
         .section { display: none; }
         .section.active { display: block; }
-        .admin-panel { padding: 20px; max-width: 600px; margin: 0 auto; }
+        .admin-panel { padding: 20px; max-width: 700px; margin: 0 auto; }
         .admin-section { background: #1a1a2a; border-radius: 16px; padding: 20px; margin-bottom: 24px; }
         .admin-section h3 { margin-bottom: 16px; color: #e94560; }
         .admin-section input, .admin-section textarea, .admin-section select { width: 100%; padding: 12px; margin-bottom: 12px; background: #0f0f1a; border: 1px solid #2a2a4a; border-radius: 8px; color: white; }
         .file-input-label { display: block; background: #2a2a4a; padding: 12px; text-align: center; border-radius: 8px; margin-bottom: 12px; cursor: pointer; }
         .chapter-list { padding: 20px; }
-        .chapter-item { background: #1a1a2a; padding: 16px; margin-bottom: 8px; border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; }
+        .chapter-item { background: #1a1a2a; padding: 16px; margin-bottom: 8px; border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .delete-btn { background: #dc2626; padding: 6px 12px; border-radius: 8px; font-size: 12px; margin-left: 12px; flex: 0; }
+        .delete-btn:hover { background: #b91c1c; }
         .hidden { display: none; }
         .empty-state { text-align: center; padding: 60px 20px; color: #666; }
         .toast { position: fixed; bottom: 20px; left: 20px; right: 20px; background: #e94560; color: white; padding: 12px; border-radius: 8px; text-align: center; z-index: 1000; display: none; }
@@ -97,36 +97,23 @@
     <input type="text" id="searchInput" placeholder="Search manga...">
 </div>
 
-<!-- Home Section (Latest Uploads) -->
 <div id="homeSection" class="section active">
     <div style="padding: 20px;"><h2>📢 Latest Uploads</h2></div>
     <div id="homeGrid" class="manga-grid"></div>
 </div>
-
-<!-- Browse Section (All Manga) -->
-<div id="browseSection" class="section">
-    <div id="browseGrid" class="manga-grid"></div>
-</div>
-
-<!-- Top Rated Section -->
+<div id="browseSection" class="section"><div id="browseGrid" class="manga-grid"></div></div>
 <div id="topratedSection" class="section">
     <div style="padding: 20px;"><h2>🏆 Top Rated Manga</h2></div>
     <div id="topratedGrid" class="manga-grid"></div>
 </div>
-
-<!-- Favorites Section -->
 <div id="favoritesSection" class="section">
     <div style="padding: 20px;"><h2>❤️ Your Favorites</h2></div>
     <div id="favoritesGrid" class="manga-grid"></div>
 </div>
-
-<!-- History Section -->
 <div id="historySection" class="section">
     <div style="padding: 20px;"><h2>🕓 Continue Reading</h2></div>
     <div id="historyList" class="chapter-list"></div>
 </div>
-
-<!-- Reading Section -->
 <div id="readingSection" class="section">
     <button class="back-btn" id="backToHome">← Back</button>
     <div class="reading-container">
@@ -143,7 +130,7 @@
     </div>
 </div>
 
-<!-- Admin Section (only for admin) -->
+<!-- Admin Section (only admin) -->
 <div id="adminSection" class="section">
     <div id="adminAuth" class="admin-panel"><input type="password" id="adminPassword" placeholder="Admin Password"><button id="adminLoginBtn">Login</button></div>
     <div id="adminContent" class="hidden">
@@ -151,13 +138,18 @@
             <div class="admin-section"><h3>📚 Add Manga</h3>
                 <input type="text" id="adminTitle" placeholder="Title"><input type="text" id="adminAuthor" placeholder="Author">
                 <textarea id="adminDesc" placeholder="Description"></textarea><input type="text" id="adminGenre" placeholder="Genre">
-                <label class="file-input-label">📁 Cover Image (PNG, JPG, etc.)<input type="file" id="adminCover" accept="image/*" style="display:none;"></label>
+                <label class="file-input-label">📁 Cover Image (PNG, JPG)<input type="file" id="adminCover" accept="image/*" style="display:none;"></label>
                 <div id="adminCoverPreview"></div><button id="adminAddMangaBtn">Add Manga</button>
             </div>
-            <div class="admin-section"><h3>📄 Add Chapter (ZIP or CBZ)</h3>
+            <div class="admin-section"><h3>📄 Add Chapter (ZIP/CBZ)</h3>
                 <select id="adminMangaSelect"></select><input type="number" id="adminChapterNum" placeholder="Chapter #">
-                <label class="file-input-label">📁 Upload Chapter Archive (ZIP/CBZ)<input type="file" id="adminChapterArchive" accept=".zip,.cbz" style="display:none;"></label>
+                <label class="file-input-label">📁 Upload Archive (ZIP/CBZ)<input type="file" id="adminChapterArchive" accept=".zip,.cbz" style="display:none;"></label>
                 <div id="adminPagesPreview"></div><button id="adminAddChapterBtn">Upload & Add Chapter</button>
+            </div>
+            <div class="admin-section"><h3>🗑️ Delete Manga or Chapter</h3>
+                <select id="deleteMangaSelect"></select>
+                <select id="deleteChapterSelect" disabled><option>Select manga first</option></select>
+                <button id="deleteSelectedBtn" style="background:#dc2626;">Delete Selected</button>
             </div>
         </div>
     </div>
@@ -167,8 +159,8 @@
 
 <script type="module">
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-    import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, orderBy, addDoc, updateDoc, arrayUnion, arrayRemove, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-    import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, orderBy, addDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
     const auth = getAuth();
     const db = getFirestore();
@@ -188,10 +180,8 @@
     // Rating helpers
     function getRatingStars(rating, size = 14) {
         const full = Math.floor(rating);
-        const half = rating % 1 >= 0.5 ? 1 : 0;
         let stars = '';
         for (let i = 0; i < full; i++) stars += '★';
-        if (half) stars += '½';
         for (let i = stars.length; i < 5; i++) stars += '☆';
         return `<span style="font-size:${size}px; color:#ffc107;">${stars}</span>`;
     }
@@ -214,17 +204,14 @@
             const data = docSnap.data();
             const ratings = data.ratings || {};
             let sum = 0, count = 0;
-            for (let uid in ratings) {
-                sum += ratings[uid];
-                count++;
-            }
+            for (let uid in ratings) { sum += ratings[uid]; count++; }
             const avg = count > 0 ? sum / count : 0;
             mangaList.push({ id: docSnap.id, ...data, avgRating: avg, ratingCount: count, userRating: currentUser ? ratings[currentUser.uid] : null });
         }
         return mangaList;
     }
 
-    async function renderMangaGrid(containerId, mangaList = null, showRating = true) {
+    async function renderMangaGrid(containerId, mangaList = null, showRating = true, showAdminDelete = false) {
         const container = document.getElementById(containerId);
         if (!mangaList) {
             const q = query(collection(db, "manga"), orderBy("createdAt", "desc"));
@@ -251,7 +238,6 @@
                 </div>
             </div>
         `).join('');
-        // Attach rating click handlers
         if (showRating) {
             document.querySelectorAll(`#${containerId} .rating-stars`).forEach(starDiv => {
                 const mangaId = starDiv.dataset.id;
@@ -262,17 +248,15 @@
                     const newRating = prompt("Rate 1-5 stars:", starDiv.dataset.userRating || "5");
                     if (newRating && !isNaN(newRating) && newRating >= 1 && newRating <= 5) {
                         await submitRating(mangaId, parseFloat(newRating));
-                        // Refresh current grid
                         const activeSection = document.querySelector('.section.active').id;
                         if (activeSection === 'homeSection') renderMangaGrid('homeGrid');
                         else if (activeSection === 'browseSection') renderMangaGrid('browseGrid');
                         else if (activeSection === 'topratedSection') loadTopRated();
                         else if (activeSection === 'favoritesSection') loadFavorites();
-                    } else if (newRating) showToast("Enter a number between 1 and 5");
+                    } else if (newRating) showToast("Enter 1-5");
                 };
             });
         }
-        // Attach favorite handlers
         document.querySelectorAll(`#${containerId} .favorite-icon`).forEach(icon => {
             icon.onclick = (e) => { e.stopPropagation(); toggleFavorite(icon.dataset.id, icon); };
         });
@@ -349,7 +333,15 @@
         const chaptersSnap = await getDocs(collection(db, "manga", mangaId, "chapters"));
         const chapters = chaptersSnap.docs.map(d => ({ num: parseInt(d.id), ...d.data() })).sort((a,b) => a.num - b.num);
         if (chapters.length === 0) { document.getElementById('pagesContainer').innerHTML = '<div class="empty-state">No chapters yet</div>'; return; }
-        document.getElementById('pagesContainer').innerHTML = `<div class="chapter-list"><h3>📑 Chapters</h3>${chapters.map(ch => `<div class="chapter-item" onclick="window.openChapter('${mangaId}', ${ch.num})">Chapter ${ch.num}<span>${ch.pageCount} pages →</span></div>`).join('')}</div>`;
+        let chaptersHtml = '<div class="chapter-list"><h3>📑 Chapters</h3>';
+        for (const ch of chapters) {
+            chaptersHtml += `<div class="chapter-item" onclick="window.openChapter('${mangaId}', ${ch.num})">
+                                <span>Chapter ${ch.num} <span style="font-size:12px;">(${ch.pageCount} pages)</span></span>
+                                <span>Read →</span>
+                            </div>`;
+        }
+        chaptersHtml += '</div>';
+        document.getElementById('pagesContainer').innerHTML = chaptersHtml;
         document.getElementById('prevChapterBtn').style.display = 'none';
         document.getElementById('nextChapterBtn').style.display = 'none';
     };
@@ -414,7 +406,6 @@
         if (document.getElementById('historySection').classList.contains('active')) loadHistory();
     });
 
-    // Navigation
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.onclick = () => {
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -429,42 +420,39 @@
             if (section === 'toprated') loadTopRated();
             if (section === 'favorites') loadFavorites();
             if (section === 'history') loadHistory();
+            if (section === 'admin' && isAdmin) loadDeleteSelects();
         };
     });
     document.getElementById('searchInput').addEventListener('input', () => { const term = document.getElementById('searchInput').value.toLowerCase(); const cards = document.querySelectorAll('#browseGrid .manga-card'); cards.forEach(card => { const title = card.querySelector('.manga-title')?.innerText.toLowerCase(); if (title) card.style.display = title.includes(term) ? 'block' : 'none'; }); });
 
-    // Archive extraction helper (supports ZIP/CBZ)
     async function extractImagesFromArchive(file, previewElement) {
         const ext = file.name.split('.').pop().toLowerCase();
-        let blobs = [];
-        if (ext === 'cbz' || ext === 'zip') {
-            const zip = await JSZip.loadAsync(file);
-            const imageFiles = Object.keys(zip.files).filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
-            for (const f of imageFiles) {
-                const blob = await zip.files[f].async('blob');
-                blobs.push(blob);
-            }
-        } else {
-            throw new Error('Unsupported file type. Please upload a ZIP or CBZ file.');
+        if (ext !== 'cbz' && ext !== 'zip') throw new Error('Only ZIP/CBZ files allowed');
+        const zip = await JSZip.loadAsync(file);
+        const imageFiles = Object.keys(zip.files).filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
+        const blobs = [];
+        for (const f of imageFiles) {
+            const blob = await zip.files[f].async('blob');
+            blobs.push(blob);
         }
         previewElement.innerHTML = `✅ Extracted ${blobs.length} images.`;
         return blobs;
     }
 
-    // Admin functions (only admin can add)
+    // Admin: Add manga/chapter
     let adminCoverData = null, adminArchiveFiles = null;
-    document.getElementById('adminLoginBtn').onclick = () => { if (document.getElementById('adminPassword').value === ADMIN_PASSWORD) { isAdmin = true; document.getElementById('adminAuth').classList.add('hidden'); document.getElementById('adminContent').classList.remove('hidden'); loadAdminSelects(); } else showToast("Wrong password"); };
+    document.getElementById('adminLoginBtn').onclick = () => { if (document.getElementById('adminPassword').value === ADMIN_PASSWORD) { isAdmin = true; document.getElementById('adminAuth').classList.add('hidden'); document.getElementById('adminContent').classList.remove('hidden'); loadAdminSelects(); loadDeleteSelects(); } else showToast("Wrong password"); };
     document.getElementById('adminCover').onchange = async (e) => { const f = e.target.files[0]; if (f) { adminCoverData = await uploadFile(f, `covers/${Date.now()}_${f.name}`); document.getElementById('adminCoverPreview').innerHTML = `<img src="${adminCoverData}" style="max-height:100px;">`; } };
     document.getElementById('adminAddMangaBtn').onclick = async () => {
         if (!isAdmin) return;
         const title = document.getElementById('adminTitle').value.trim(), author = document.getElementById('adminAuthor').value.trim();
         if (!title || !author) { showToast("Title & author required"); return; }
         await addDoc(collection(db, "manga"), { title, author, description: document.getElementById('adminDesc').value, genre: document.getElementById('adminGenre').value, coverUrl: adminCoverData, createdAt: new Date(), chapterCount: 0, ratings: {} });
-        showToast(`"${title}" added`); document.getElementById('adminTitle').value = ''; document.getElementById('adminAuthor').value = ''; document.getElementById('adminDesc').value = ''; document.getElementById('adminGenre').value = ''; document.getElementById('adminCoverPreview').innerHTML = ''; adminCoverData = null; loadAdminSelects();
+        showToast(`"${title}" added`); document.getElementById('adminTitle').value = ''; document.getElementById('adminAuthor').value = ''; document.getElementById('adminDesc').value = ''; document.getElementById('adminGenre').value = ''; document.getElementById('adminCoverPreview').innerHTML = ''; adminCoverData = null; loadAdminSelects(); loadDeleteSelects(); renderMangaGrid('homeGrid'); renderMangaGrid('browseGrid');
     };
     document.getElementById('adminChapterArchive').onchange = async (e) => {
         const file = e.target.files[0]; const preview = document.getElementById('adminPagesPreview');
-        if (file) { preview.innerHTML = 'Extracting images...'; try { adminArchiveFiles = await extractImagesFromArchive(file, preview); preview.innerHTML = `✅ ${adminArchiveFiles.length} images ready`; } catch(err) { showToast(err.message); adminArchiveFiles = null; preview.innerHTML = ''; } }
+        if (file) { preview.innerHTML = 'Extracting...'; try { adminArchiveFiles = await extractImagesFromArchive(file, preview); preview.innerHTML = `✅ ${adminArchiveFiles.length} images ready`; } catch(err) { showToast(err.message); adminArchiveFiles = null; preview.innerHTML = ''; } }
     };
     document.getElementById('adminAddChapterBtn').onclick = async () => {
         if (!isAdmin) return;
@@ -475,9 +463,81 @@
         await setDoc(doc(db, "manga", mangaId, "chapters", chapterNum.toString()), { num: chapterNum, pages: pageUrls, pageCount: pageUrls.length });
         const mangaRef = doc(db, "manga", mangaId); const mangaSnap = await getDoc(mangaRef);
         await updateDoc(mangaRef, { chapterCount: (mangaSnap.data().chapterCount || 0) + 1 });
-        showToast(`Chapter ${chapterNum} added`); document.getElementById('adminChapterNum').value = ''; document.getElementById('adminPagesPreview').innerHTML = ''; adminArchiveFiles = null; loadAdminSelects();
+        showToast(`Chapter ${chapterNum} added`); document.getElementById('adminChapterNum').value = ''; document.getElementById('adminPagesPreview').innerHTML = ''; adminArchiveFiles = null; loadAdminSelects(); loadDeleteSelects(); renderMangaGrid('homeGrid'); renderMangaGrid('browseGrid');
     };
-    async function loadAdminSelects() { const snap = await getDocs(collection(db, "manga")); const select = document.getElementById('adminMangaSelect'); select.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join(''); }
+    async function loadAdminSelects() {
+        const snap = await getDocs(collection(db, "manga"));
+        const select = document.getElementById('adminMangaSelect');
+        select.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join('');
+    }
+
+    // Admin: Delete functionality
+    async function loadDeleteSelects() {
+        const snap = await getDocs(collection(db, "manga"));
+        const mangaSelect = document.getElementById('deleteMangaSelect');
+        mangaSelect.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join('');
+        mangaSelect.onchange = async () => {
+            const mangaId = mangaSelect.value;
+            const chapterSelect = document.getElementById('deleteChapterSelect');
+            if (!mangaId) { chapterSelect.disabled = true; chapterSelect.innerHTML = '<option>Select manga first</option>'; return; }
+            const chaptersSnap = await getDocs(collection(db, "manga", mangaId, "chapters"));
+            const chapters = chaptersSnap.docs.map(d => ({ num: parseInt(d.id), ...d.data() })).sort((a,b) => a.num - b.num);
+            chapterSelect.disabled = false;
+            chapterSelect.innerHTML = '<option value="">-- Delete entire manga --</option>' + chapters.map(ch => `<option value="chapter_${ch.num}">Chapter ${ch.num} (${ch.pageCount} pages)</option>`).join('');
+        };
+    }
+    document.getElementById('deleteSelectedBtn').onclick = async () => {
+        if (!isAdmin) { showToast("Admin only"); return; }
+        const mangaId = document.getElementById('deleteMangaSelect').value;
+        const chapterValue = document.getElementById('deleteChapterSelect').value;
+        if (!mangaId) { showToast("Select a manga"); return; }
+        if (confirm("Are you sure? This cannot be undone.")) {
+            if (chapterValue === "") {
+                // Delete entire manga and all its chapters + storage
+                const chaptersSnap = await getDocs(collection(db, "manga", mangaId, "chapters"));
+                for (const chapDoc of chaptersSnap.docs) {
+                    const pages = chapDoc.data().pages;
+                    for (const url of pages) {
+                        const storageRef = ref(storage, url);
+                        try { await deleteObject(storageRef); } catch(e) {}
+                    }
+                    await deleteDoc(doc(db, "manga", mangaId, "chapters", chapDoc.id));
+                }
+                const mangaRef = doc(db, "manga", mangaId);
+                const mangaData = (await getDoc(mangaRef)).data();
+                if (mangaData.coverUrl) {
+                    const coverRef = ref(storage, mangaData.coverUrl);
+                    try { await deleteObject(coverRef); } catch(e) {}
+                }
+                await deleteDoc(mangaRef);
+                showToast("Manga deleted");
+            } else {
+                const chapterNum = parseInt(chapterValue.split('_')[1]);
+                const chapterRef = doc(db, "manga", mangaId, "chapters", chapterNum.toString());
+                const chapterSnap = await getDoc(chapterRef);
+                if (chapterSnap.exists()) {
+                    const pages = chapterSnap.data().pages;
+                    for (const url of pages) {
+                        const storageRef = ref(storage, url);
+                        try { await deleteObject(storageRef); } catch(e) {}
+                    }
+                    await deleteDoc(chapterRef);
+                    // Decrement chapter count
+                    const mangaRef = doc(db, "manga", mangaId);
+                    const mangaSnap = await getDoc(mangaRef);
+                    await updateDoc(mangaRef, { chapterCount: (mangaSnap.data().chapterCount || 0) - 1 });
+                    showToast(`Chapter ${chapterNum} deleted`);
+                }
+            }
+            // Refresh all views
+            loadDeleteSelects();
+            loadAdminSelects();
+            renderMangaGrid('homeGrid');
+            renderMangaGrid('browseGrid');
+            loadTopRated();
+            if (currentUser) loadFavorites();
+        }
+    };
 
     async function uploadFile(file, path) {
         const storageRef = ref(storage, path);
@@ -485,7 +545,6 @@
         return await getDownloadURL(storageRef);
     }
 
-    // Initial load
     renderMangaGrid('homeGrid');
     renderMangaGrid('browseGrid');
 </script>
