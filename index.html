@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>MangaFlow - Fixed</title>
+    <title>MangaFlow - Fixed Admin</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -83,7 +83,7 @@
 <div class="header">
     <h1>Manga<span>Flow</span></h1>
     <div class="nav">
-        <button class="nav-btn active" data-section="home">🏠 Home</button>
+        <button class="nav-btn" data-section="home">🏠 Home</button>
         <button class="nav-btn" data-section="browse">📚 Browse</button>
         <button class="nav-btn" data-section="toprated">🏆 Top Rated</button>
         <button class="nav-btn" data-section="favorites">❤️ Favorites</button>
@@ -97,7 +97,7 @@
     <input type="text" id="searchInput" placeholder="Search manga...">
 </div>
 
-<div id="homeSection" class="section active">
+<div id="homeSection" class="section">
     <div style="padding: 20px;"><h2>📢 Latest Uploads</h2></div>
     <div id="homeGrid" class="manga-grid"></div>
 </div>
@@ -421,24 +421,58 @@
         if (document.getElementById('historySection').classList.contains('active')) loadHistory();
     });
 
+    // Navigation - fixed: always show section, no isAdmin check
     document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.onclick = () => {
+        btn.addEventListener('click', () => {
+            const section = btn.dataset.section;
+            console.log("Navigating to section:", section);
+            // Update active button style
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            const section = btn.dataset.section;
-            previousSection = section;
+            // Hide all sections
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            document.getElementById(`${section}Section`).classList.add('active');
-            document.getElementById('searchContainer').style.display = (section === 'home' || section === 'browse' || section === 'toprated') ? 'block' : 'none';
-            if (section === 'home') renderMangaGrid('homeGrid');
-            if (section === 'browse') renderMangaGrid('browseGrid');
-            if (section === 'toprated') loadTopRated();
-            if (section === 'favorites') loadFavorites();
-            if (section === 'history') loadHistory();
-            if (section === 'admin' && isAdmin) { loadAdminSelects(); loadDeleteSelects(); }
-        };
+            // Show selected section
+            const targetSection = document.getElementById(`${section}Section`);
+            if (targetSection) {
+                targetSection.classList.add('active');
+                previousSection = section;
+                // Show/hide search bar
+                const searchContainer = document.getElementById('searchContainer');
+                if (section === 'home' || section === 'browse' || section === 'toprated') {
+                    searchContainer.style.display = 'block';
+                } else {
+                    searchContainer.style.display = 'none';
+                }
+                // Load data if needed
+                if (section === 'home') renderMangaGrid('homeGrid');
+                if (section === 'browse') renderMangaGrid('browseGrid');
+                if (section === 'toprated') loadTopRated();
+                if (section === 'favorites') loadFavorites();
+                if (section === 'history') loadHistory();
+                if (section === 'admin') {
+                    // Just show the admin section; login state handled inside
+                    console.log("Admin section opened");
+                }
+            } else {
+                console.error("Section not found:", section);
+            }
+        });
     });
-    document.getElementById('searchInput').addEventListener('input', () => { const term = document.getElementById('searchInput').value.toLowerCase(); const cards = document.querySelectorAll('#browseGrid .manga-card'); cards.forEach(card => { const title = card.querySelector('.manga-title')?.innerText.toLowerCase(); if (title) card.style.display = title.includes(term) ? 'block' : 'none'; }); });
+    
+    // Set initial active section
+    document.querySelector('.nav-btn[data-section="home"]').classList.add('active');
+    document.getElementById('homeSection').classList.add('active');
+    renderMangaGrid('homeGrid');
+    renderMangaGrid('browseGrid');
+
+    document.getElementById('searchInput').addEventListener('input', () => { 
+        const term = document.getElementById('searchInput').value.toLowerCase(); 
+        const cards = document.querySelectorAll('#browseGrid .manga-card'); 
+        cards.forEach(card => { 
+            const title = card.querySelector('.manga-title')?.innerText.toLowerCase(); 
+            if (title) card.style.display = title.includes(term) ? 'block' : 'none'; 
+        }); 
+    });
 
     async function extractImagesFromArchive(file, previewElement) {
         const ext = file.name.split('.').pop().toLowerCase();
@@ -481,7 +515,7 @@
     };
 
     document.getElementById('adminAddMangaBtn').onclick = async () => {
-        if (!isAdmin) return;
+        if (!isAdmin) { showToast("Please login as admin first"); return; }
         const title = document.getElementById('adminTitle').value.trim();
         const author = document.getElementById('adminAuthor').value.trim();
         if (!title || !author) { showToast("Title & author required"); return; }
@@ -544,7 +578,7 @@
     };
 
     document.getElementById('adminAddChapterBtn').onclick = async () => {
-        if (!isAdmin) return;
+        if (!isAdmin) { showToast("Please login as admin first"); return; }
         const mangaId = document.getElementById('adminMangaSelect').value;
         const chapterNum = parseInt(document.getElementById('adminChapterNum').value);
         if (!mangaId || !chapterNum || !adminArchiveFiles || adminArchiveFiles.length === 0) {
@@ -668,9 +702,20 @@
         return await getDownloadURL(storageRef);
     }
 
-    // Initial load
-    renderMangaGrid('homeGrid');
-    renderMangaGrid('browseGrid');
+    // Admin login
+    document.getElementById('adminLoginBtn').onclick = () => {
+        const pwd = document.getElementById('adminPassword').value;
+        if (pwd === ADMIN_PASSWORD) {
+            isAdmin = true;
+            document.getElementById('adminAuth').classList.add('hidden');
+            document.getElementById('adminContent').classList.remove('hidden');
+            loadAdminSelects();
+            loadDeleteSelects();
+            showToast("Admin logged in");
+        } else {
+            showToast("Wrong password");
+        }
+    };
 </script>
 </body>
 </html>
