@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>MangaFlow - Debug Version</title>
+    <title>MangaFlow - Fixed</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -67,8 +67,6 @@
         .file-input-label { display: block; background: #2a2a4a; padding: 12px; text-align: center; border-radius: 8px; margin-bottom: 12px; cursor: pointer; }
         .chapter-list { padding: 20px; }
         .chapter-item { background: #1a1a2a; padding: 16px; margin-bottom: 8px; border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .delete-btn { background: #dc2626; padding: 6px 12px; border-radius: 8px; font-size: 12px; margin-left: 12px; flex: 0; }
-        .delete-btn:hover { background: #b91c1c; }
         .hidden { display: none; }
         .empty-state { text-align: center; padding: 60px 20px; color: #666; }
         .toast { position: fixed; bottom: 20px; left: 20px; right: 20px; background: #e94560; color: white; padding: 12px; border-radius: 8px; text-align: center; z-index: 1000; display: none; }
@@ -77,7 +75,7 @@
         .auth-card input { width: 100%; padding: 12px; margin-bottom: 12px; background: #0f0f1a; border: 1px solid #2a2a4a; border-radius: 8px; color: white; }
         .auth-card button { width: 100%; margin-top: 8px; }
         .refresh-btn { background: #2a2a4a; margin-top: 10px; }
-        @media (max-width: 500px) { .manga-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); } }
+        .status-text { font-size: 12px; color: #aaa; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -141,6 +139,7 @@
                 <textarea id="adminDesc" placeholder="Description"></textarea><input type="text" id="adminGenre" placeholder="Genre">
                 <label class="file-input-label">📁 Cover Image (PNG, JPG)<input type="file" id="adminCover" accept="image/*" style="display:none;"></label>
                 <div id="adminCoverPreview"></div>
+                <div id="coverUploadStatus" class="status-text"></div>
                 <button id="adminAddMangaBtn">Add Manga</button>
                 <button id="refreshMangaListBtn" class="refresh-btn">⟳ Refresh Manga List</button>
             </div>
@@ -149,6 +148,7 @@
                 <input type="number" id="adminChapterNum" placeholder="Chapter #">
                 <label class="file-input-label">📁 Upload Archive (ZIP/CBZ)<input type="file" id="adminChapterArchive" accept=".zip,.cbz" style="display:none;"></label>
                 <div id="adminPagesPreview"></div>
+                <div id="chapterUploadStatus" class="status-text"></div>
                 <button id="adminAddChapterBtn">Upload & Add Chapter</button>
             </div>
             <div class="admin-section"><h3>🗑️ Delete Manga or Chapter</h3>
@@ -179,7 +179,14 @@
     let isAdmin = false;
     const ADMIN_PASSWORD = "R@y4n3_M4ng4";
 
-    function showToast(msg) { const toast = document.getElementById('toast'); toast.textContent = msg; toast.style.display = 'block'; setTimeout(() => toast.style.display = 'none', 3000); console.log("Toast:", msg); }
+    function showToast(msg) { 
+        const toast = document.getElementById('toast'); 
+        toast.textContent = msg; 
+        toast.style.display = 'block'; 
+        setTimeout(() => toast.style.display = 'none', 3000); 
+        console.log("TOAST:", msg);
+    }
+    
     function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
 
     function getRatingStars(rating, size = 14) {
@@ -231,7 +238,7 @@
             favorites = userSnap.data()?.favorites || [];
         }
         container.innerHTML = mangaList.map(m => {
-            const coverHtml = m.coverUrl ? `<img src="${m.coverUrl}" onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=\"cover-error-fallback\">📖</span>';">` : '<span>📖</span>';
+            const coverHtml = m.coverUrl ? `<img src="${m.coverUrl}" onerror="this.style.display='none'; this.parentElement.innerHTML='<span class=\"cover-error-fallback\">📖</span>'; console.log('Cover failed to load:', '${m.coverUrl}');">` : '<span>📖</span>';
             return `
             <div class="manga-card" data-id="${m.id}">
                 <div class="favorite-icon ${favorites.includes(m.id) ? 'favorited' : ''}" data-id="${m.id}">❤️</div>
@@ -438,6 +445,7 @@
         if (ext !== 'cbz' && ext !== 'zip') throw new Error('Only ZIP/CBZ files allowed');
         const zip = await JSZip.loadAsync(file);
         const imageFiles = Object.keys(zip.files).filter(f => /\.(jpg|jpeg|png|webp)$/i.test(f)).sort();
+        if (imageFiles.length === 0) throw new Error('No images found in archive');
         const blobs = [];
         for (const f of imageFiles) {
             const blob = await zip.files[f].async('blob');
@@ -447,58 +455,57 @@
         return blobs;
     }
 
-    let adminCoverData = null, adminArchiveFiles = null;
-    document.getElementById('adminLoginBtn').onclick = () => { 
-        if (document.getElementById('adminPassword').value === ADMIN_PASSWORD) { 
-            isAdmin = true; 
-            document.getElementById('adminAuth').classList.add('hidden'); 
-            document.getElementById('adminContent').classList.remove('hidden'); 
-            loadAdminSelects(); 
-            loadDeleteSelects(); 
-            showToast("Admin logged in");
-        } else showToast("Wrong password"); 
+    // Admin: cover upload
+    let adminCoverData = null;
+    document.getElementById('adminCover').onchange = async (e) => {
+        const f = e.target.files[0];
+        const statusDiv = document.getElementById('coverUploadStatus');
+        if (!f) return;
+        try {
+            statusDiv.innerHTML = "Uploading cover...";
+            const ext = f.name.split('.').pop().toLowerCase();
+            if (!['jpg','jpeg','png','webp'].includes(ext)) throw new Error("Only JPG, PNG, WEBP allowed");
+            const storagePath = `covers/${Date.now()}_${f.name}`;
+            const storageRef = ref(storage, storagePath);
+            await uploadBytes(storageRef, f);
+            const url = await getDownloadURL(storageRef);
+            adminCoverData = url;
+            document.getElementById('adminCoverPreview').innerHTML = `<img src="${url}" style="max-height:100px;">`;
+            statusDiv.innerHTML = "Cover uploaded ✅";
+            console.log("Cover URL:", url);
+        } catch(err) {
+            statusDiv.innerHTML = "Upload failed: " + err.message;
+            showToast(err.message);
+            adminCoverData = null;
+        }
     };
-    
-    document.getElementById('adminCover').onchange = async (e) => { 
-        const f = e.target.files[0]; 
-        if (f) { 
-            try {
-                const ext = f.name.split('.').pop().toLowerCase();
-                if (!['jpg','jpeg','png','webp'].includes(ext)) throw new Error("Only JPG, PNG, WEBP");
-                adminCoverData = await uploadFile(f, `covers/${Date.now()}_${f.name}`); 
-                document.getElementById('adminCoverPreview').innerHTML = `<img src="${adminCoverData}" style="max-height:100px;">`; 
-                showToast("Cover uploaded successfully");
-                console.log("Cover URL saved:", adminCoverData);
-            } catch(err) { showToast("Cover upload failed: "+err.message); adminCoverData = null; }
-        } 
-    };
-    
+
     document.getElementById('adminAddMangaBtn').onclick = async () => {
         if (!isAdmin) return;
         const title = document.getElementById('adminTitle').value.trim();
         const author = document.getElementById('adminAuthor').value.trim();
         if (!title || !author) { showToast("Title & author required"); return; }
-        const coverUrl = adminCoverData || null;
         try {
-            const docRef = await addDoc(collection(db, "manga"), { 
-                title, author, 
-                description: document.getElementById('adminDesc').value, 
-                genre: document.getElementById('adminGenre').value, 
-                coverUrl: coverUrl, 
-                createdAt: new Date(), 
-                chapterCount: 0, 
-                ratings: {} 
+            const docRef = await addDoc(collection(db, "manga"), {
+                title, author,
+                description: document.getElementById('adminDesc').value,
+                genre: document.getElementById('adminGenre').value,
+                coverUrl: adminCoverData || null,
+                createdAt: new Date(),
+                chapterCount: 0,
+                ratings: {}
             });
             showToast(`"${title}" added with ID ${docRef.id}`);
-            console.log("Manga added:", docRef.id, {title, author, coverUrl});
+            console.log("Manga added:", docRef.id);
             // Clear form
-            document.getElementById('adminTitle').value = ''; 
-            document.getElementById('adminAuthor').value = ''; 
-            document.getElementById('adminDesc').value = ''; 
-            document.getElementById('adminGenre').value = ''; 
-            document.getElementById('adminCoverPreview').innerHTML = ''; 
+            document.getElementById('adminTitle').value = '';
+            document.getElementById('adminAuthor').value = '';
+            document.getElementById('adminDesc').value = '';
+            document.getElementById('adminGenre').value = '';
+            document.getElementById('adminCoverPreview').innerHTML = '';
+            document.getElementById('coverUploadStatus').innerHTML = '';
             adminCoverData = null;
-            // Refresh dropdowns and grids
+            // Refresh
             await loadAdminSelects();
             await loadDeleteSelects();
             await renderMangaGrid('homeGrid');
@@ -508,47 +515,88 @@
             console.error(err);
         }
     };
-    
+
     document.getElementById('refreshMangaListBtn').onclick = async () => {
         await loadAdminSelects();
         await loadDeleteSelects();
         showToast("Manga list refreshed");
     };
-    
+
+    // Chapter upload
+    let adminArchiveFiles = null;
     document.getElementById('adminChapterArchive').onchange = async (e) => {
-        const file = e.target.files[0]; const preview = document.getElementById('adminPagesPreview');
-        if (file) { preview.innerHTML = 'Extracting...'; try { adminArchiveFiles = await extractImagesFromArchive(file, preview); preview.innerHTML = `✅ ${adminArchiveFiles.length} images ready`; } catch(err) { showToast(err.message); adminArchiveFiles = null; preview.innerHTML = ''; } }
+        const file = e.target.files[0];
+        const previewDiv = document.getElementById('adminPagesPreview');
+        const statusDiv = document.getElementById('chapterUploadStatus');
+        if (!file) return;
+        previewDiv.innerHTML = 'Extracting images...';
+        statusDiv.innerHTML = '';
+        try {
+            adminArchiveFiles = await extractImagesFromArchive(file, previewDiv);
+            previewDiv.innerHTML = `✅ Extracted ${adminArchiveFiles.length} images. Ready to upload.`;
+            statusDiv.innerHTML = `Ready: ${adminArchiveFiles.length} pages`;
+        } catch(err) {
+            showToast(err.message);
+            previewDiv.innerHTML = 'Extraction failed';
+            statusDiv.innerHTML = err.message;
+            adminArchiveFiles = null;
+        }
     };
-    
+
     document.getElementById('adminAddChapterBtn').onclick = async () => {
         if (!isAdmin) return;
         const mangaId = document.getElementById('adminMangaSelect').value;
         const chapterNum = parseInt(document.getElementById('adminChapterNum').value);
-        if (!mangaId || !chapterNum || !adminArchiveFiles || adminArchiveFiles.length === 0) { showToast("Complete all fields"); return; }
+        if (!mangaId || !chapterNum || !adminArchiveFiles || adminArchiveFiles.length === 0) {
+            showToast("Select manga, chapter #, and upload a ZIP/CBZ file first");
+            return;
+        }
+        const statusDiv = document.getElementById('chapterUploadStatus');
+        statusDiv.innerHTML = "Uploading pages to Firebase Storage...";
         try {
             const pageUrls = [];
-            for (let i=0; i<adminArchiveFiles.length; i++) pageUrls.push(await uploadFile(adminArchiveFiles[i], `pages/${mangaId}/${chapterNum}/page_${i+1}.jpg`));
-            await setDoc(doc(db, "manga", mangaId, "chapters", chapterNum.toString()), { num: chapterNum, pages: pageUrls, pageCount: pageUrls.length });
-            const mangaRef = doc(db, "manga", mangaId); const mangaSnap = await getDoc(mangaRef);
+            for (let i=0; i<adminArchiveFiles.length; i++) {
+                const file = adminArchiveFiles[i];
+                const path = `pages/${mangaId}/${chapterNum}/page_${i+1}.jpg`;
+                const storageRef = ref(storage, path);
+                await uploadBytes(storageRef, file);
+                const url = await getDownloadURL(storageRef);
+                pageUrls.push(url);
+                statusDiv.innerHTML = `Uploaded ${i+1}/${adminArchiveFiles.length} pages...`;
+            }
+            await setDoc(doc(db, "manga", mangaId, "chapters", chapterNum.toString()), {
+                num: chapterNum,
+                pages: pageUrls,
+                pageCount: pageUrls.length
+            });
+            const mangaRef = doc(db, "manga", mangaId);
+            const mangaSnap = await getDoc(mangaRef);
             await updateDoc(mangaRef, { chapterCount: (mangaSnap.data().chapterCount || 0) + 1 });
             showToast(`Chapter ${chapterNum} added with ${pageUrls.length} pages`);
-            document.getElementById('adminChapterNum').value = ''; 
-            document.getElementById('adminPagesPreview').innerHTML = ''; 
+            statusDiv.innerHTML = "Chapter added successfully!";
+            document.getElementById('adminChapterNum').value = '';
+            document.getElementById('adminPagesPreview').innerHTML = '';
             adminArchiveFiles = null;
-            await loadAdminSelects(); 
-            await loadDeleteSelects(); 
-            await renderMangaGrid('homeGrid'); 
+            await loadAdminSelects();
+            await loadDeleteSelects();
+            await renderMangaGrid('homeGrid');
             await renderMangaGrid('browseGrid');
-        } catch(err) { showToast("Error adding chapter: "+err.message); console.error(err); }
+        } catch(err) {
+            showToast("Error adding chapter: "+err.message);
+            statusDiv.innerHTML = "Error: "+err.message;
+            console.error(err);
+        }
     };
-    
+
     async function loadAdminSelects() {
         try {
             const snap = await getDocs(collection(db, "manga"));
-            console.log(`Admin select: found ${snap.docs.length} manga`);
             const select = document.getElementById('adminMangaSelect');
-            select.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join('');
-            if (snap.docs.length === 0) select.innerHTML = '<option value="">No manga found. Add one first.</option>';
+            if (snap.docs.length === 0) {
+                select.innerHTML = '<option value="">No manga found. Add one first.</option>';
+            } else {
+                select.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join('');
+            }
         } catch(err) { console.error(err); showToast("Failed to load manga list"); }
     }
 
@@ -566,55 +614,52 @@
             chapterSelect.innerHTML = '<option value="">-- Delete entire manga --</option>' + chapters.map(ch => `<option value="chapter_${ch.num}">Chapter ${ch.num} (${ch.pageCount} pages)</option>`).join('');
         };
     }
-    
+
     document.getElementById('deleteSelectedBtn').onclick = async () => {
         if (!isAdmin) { showToast("Admin only"); return; }
         const mangaId = document.getElementById('deleteMangaSelect').value;
         const chapterValue = document.getElementById('deleteChapterSelect').value;
         if (!mangaId) { showToast("Select a manga"); return; }
-        if (confirm("Are you sure? This cannot be undone.")) {
-            if (chapterValue === "") {
-                const chaptersSnap = await getDocs(collection(db, "manga", mangaId, "chapters"));
-                for (const chapDoc of chaptersSnap.docs) {
-                    const pages = chapDoc.data().pages;
-                    for (const url of pages) {
-                        const storageRef = ref(storage, url);
-                        try { await deleteObject(storageRef); } catch(e) {}
-                    }
-                    await deleteDoc(doc(db, "manga", mangaId, "chapters", chapDoc.id));
+        if (!confirm("Are you sure? This cannot be undone.")) return;
+        if (chapterValue === "") {
+            // Delete entire manga
+            const chaptersSnap = await getDocs(collection(db, "manga", mangaId, "chapters"));
+            for (const chapDoc of chaptersSnap.docs) {
+                const pages = chapDoc.data().pages;
+                for (const url of pages) {
+                    try { await deleteObject(ref(storage, url)); } catch(e) {}
                 }
-                const mangaRef = doc(db, "manga", mangaId);
-                const mangaData = (await getDoc(mangaRef)).data();
-                if (mangaData.coverUrl) {
-                    const coverRef = ref(storage, mangaData.coverUrl);
-                    try { await deleteObject(coverRef); } catch(e) {}
-                }
-                await deleteDoc(mangaRef);
-                showToast("Manga deleted");
-            } else {
-                const chapterNum = parseInt(chapterValue.split('_')[1]);
-                const chapterRef = doc(db, "manga", mangaId, "chapters", chapterNum.toString());
-                const chapterSnap = await getDoc(chapterRef);
-                if (chapterSnap.exists()) {
-                    const pages = chapterSnap.data().pages;
-                    for (const url of pages) {
-                        const storageRef = ref(storage, url);
-                        try { await deleteObject(storageRef); } catch(e) {}
-                    }
-                    await deleteDoc(chapterRef);
-                    const mangaRef = doc(db, "manga", mangaId);
-                    const mangaSnap = await getDoc(mangaRef);
-                    await updateDoc(mangaRef, { chapterCount: (mangaSnap.data().chapterCount || 0) - 1 });
-                    showToast(`Chapter ${chapterNum} deleted`);
-                }
+                await deleteDoc(doc(db, "manga", mangaId, "chapters", chapDoc.id));
             }
-            await loadDeleteSelects();
-            await loadAdminSelects();
-            await renderMangaGrid('homeGrid');
-            await renderMangaGrid('browseGrid');
-            await loadTopRated();
-            if (currentUser) await loadFavorites();
+            const mangaRef = doc(db, "manga", mangaId);
+            const mangaData = (await getDoc(mangaRef)).data();
+            if (mangaData.coverUrl) {
+                try { await deleteObject(ref(storage, mangaData.coverUrl)); } catch(e) {}
+            }
+            await deleteDoc(mangaRef);
+            showToast("Manga deleted");
+        } else {
+            const chapterNum = parseInt(chapterValue.split('_')[1]);
+            const chapterRef = doc(db, "manga", mangaId, "chapters", chapterNum.toString());
+            const chapterSnap = await getDoc(chapterRef);
+            if (chapterSnap.exists()) {
+                const pages = chapterSnap.data().pages;
+                for (const url of pages) {
+                    try { await deleteObject(ref(storage, url)); } catch(e) {}
+                }
+                await deleteDoc(chapterRef);
+                const mangaRef = doc(db, "manga", mangaId);
+                const mangaSnap = await getDoc(mangaRef);
+                await updateDoc(mangaRef, { chapterCount: (mangaSnap.data().chapterCount || 0) - 1 });
+                showToast(`Chapter ${chapterNum} deleted`);
+            }
         }
+        await loadDeleteSelects();
+        await loadAdminSelects();
+        await renderMangaGrid('homeGrid');
+        await renderMangaGrid('browseGrid');
+        await loadTopRated();
+        if (currentUser) await loadFavorites();
     };
 
     async function uploadFile(file, path) {
