@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>MangaFlow - Fixed Admin</title>
+    <title>MangaFlow - Working</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -137,7 +137,7 @@
             <div class="admin-section"><h3>📚 Add Manga</h3>
                 <input type="text" id="adminTitle" placeholder="Title"><input type="text" id="adminAuthor" placeholder="Author">
                 <textarea id="adminDesc" placeholder="Description"></textarea><input type="text" id="adminGenre" placeholder="Genre">
-                <label class="file-input-label">📁 Cover Image (PNG, JPG)<input type="file" id="adminCover" accept="image/*" style="display:none;"></label>
+                <label class="file-input-label" id="coverLabel">📁 Cover Image (PNG, JPG)<input type="file" id="adminCover" accept="image/*" style="display:none;"></label>
                 <div id="adminCoverPreview"></div>
                 <div id="coverUploadStatus" class="status-text"></div>
                 <button id="adminAddMangaBtn">Add Manga</button>
@@ -146,7 +146,7 @@
             <div class="admin-section"><h3>📄 Add Chapter (ZIP/CBZ)</h3>
                 <select id="adminMangaSelect"></select>
                 <input type="number" id="adminChapterNum" placeholder="Chapter #">
-                <label class="file-input-label">📁 Upload Archive (ZIP/CBZ)<input type="file" id="adminChapterArchive" accept=".zip,.cbz" style="display:none;"></label>
+                <label class="file-input-label" id="archiveLabel">📁 Upload Archive (ZIP/CBZ)<input type="file" id="adminChapterArchive" accept=".zip,.cbz" style="display:none;"></label>
                 <div id="adminPagesPreview"></div>
                 <div id="chapterUploadStatus" class="status-text"></div>
                 <button id="adminAddChapterBtn">Upload & Add Chapter</button>
@@ -450,7 +450,6 @@
                 if (section === 'favorites') loadFavorites();
                 if (section === 'history') loadHistory();
                 if (section === 'admin') {
-                    // Just show the admin section; login state handled inside
                     console.log("Admin section opened");
                 }
             } else {
@@ -489,9 +488,12 @@
         return blobs;
     }
 
-    // Admin: cover upload
+    // Admin: cover upload with manual trigger (file input click)
     let adminCoverData = null;
-    document.getElementById('adminCover').onchange = async (e) => {
+    const coverInput = document.getElementById('adminCover');
+    const coverLabel = document.getElementById('coverLabel');
+    coverLabel.addEventListener('click', () => coverInput.click());
+    coverInput.addEventListener('change', async (e) => {
         const f = e.target.files[0];
         const statusDiv = document.getElementById('coverUploadStatus');
         if (!f) return;
@@ -512,7 +514,7 @@
             showToast(err.message);
             adminCoverData = null;
         }
-    };
+    });
 
     document.getElementById('adminAddMangaBtn').onclick = async () => {
         if (!isAdmin) { showToast("Please login as admin first"); return; }
@@ -539,7 +541,7 @@
             document.getElementById('adminCoverPreview').innerHTML = '';
             document.getElementById('coverUploadStatus').innerHTML = '';
             adminCoverData = null;
-            // Refresh
+            // Refresh dropdowns and grids
             await loadAdminSelects();
             await loadDeleteSelects();
             await renderMangaGrid('homeGrid');
@@ -558,7 +560,10 @@
 
     // Chapter upload
     let adminArchiveFiles = null;
-    document.getElementById('adminChapterArchive').onchange = async (e) => {
+    const archiveInput = document.getElementById('adminChapterArchive');
+    const archiveLabel = document.getElementById('archiveLabel');
+    archiveLabel.addEventListener('click', () => archiveInput.click());
+    archiveInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         const previewDiv = document.getElementById('adminPagesPreview');
         const statusDiv = document.getElementById('chapterUploadStatus');
@@ -575,7 +580,7 @@
             statusDiv.innerHTML = err.message;
             adminArchiveFiles = null;
         }
-    };
+    });
 
     document.getElementById('adminAddChapterBtn').onclick = async () => {
         if (!isAdmin) { showToast("Please login as admin first"); return; }
@@ -631,6 +636,7 @@
             } else {
                 select.innerHTML = '<option value="">Select manga</option>' + snap.docs.map(d => `<option value="${d.id}">${escapeHtml(d.data().title)}</option>`).join('');
             }
+            console.log("Admin select loaded with", snap.docs.length, "manga");
         } catch(err) { console.error(err); showToast("Failed to load manga list"); }
     }
 
